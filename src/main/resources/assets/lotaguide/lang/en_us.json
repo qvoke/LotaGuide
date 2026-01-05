@@ -1,0 +1,10 @@
+{
+    "item.lotaguide.image_book": "Image Book",
+    "item.lotaguide.signed_image_book": "Signed Image Book",
+    "item.lotaguide.signed_image_book.pages": "%d pages",
+    "itemGroup.lotaguide.lota_tab": "Lota Guide",
+    "screen.lotaguide.image_book.text_hint": "Enter text here...",
+    "screen.lotaguide.image_book.no_image": "Enter image URL above",
+    "screen.lotaguide.image_book.sign": "Sign",
+    "screen.lotaguide.image_book.edit": "Edit"
+}

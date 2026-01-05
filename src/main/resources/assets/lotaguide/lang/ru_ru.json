@@ -1,0 +1,10 @@
+{
+    "item.lotaguide.image_book": "Книга с изображениями",
+    "item.lotaguide.signed_image_book": "Подписанная книга",
+    "item.lotaguide.signed_image_book.pages": "%d страниц",
+    "itemGroup.lotaguide.lota_tab": "Lota Guide",
+    "screen.lotaguide.image_book.text_hint": "Введите текст...",
+    "screen.lotaguide.image_book.no_image": "Введите ссылку выше",
+    "screen.lotaguide.image_book.sign": "Готово",
+    "screen.lotaguide.image_book.edit": "Редактировать"
+}

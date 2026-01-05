@@ -1,0 +1,15 @@
+# Gradle temporary files
+.gradle/
+build/
+
+# Launch results
+run/
+
+# IDE Settings (IntelliJ IDEA)
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Logs
+*.log
