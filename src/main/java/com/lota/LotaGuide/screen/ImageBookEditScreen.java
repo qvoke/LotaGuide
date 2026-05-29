@@ -4,6 +4,7 @@ import com.lota.LotaGuide.LotaGuide;
 import com.lota.LotaGuide.client.ImageCache;
 import com.lota.LotaGuide.data.ImageBookData;
 import com.mojang.blaze3d.systems.RenderSystem;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.MultiLineEditBox;
@@ -16,10 +17,12 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.lwjgl.util.tinyfd.TinyFileDialogs;
+
+import java.io.File;
 
 /**
  * Screen for editing an Image Book.
- * Layout: URL field -> Image -> Text -> Page controls
  */
 @OnlyIn(Dist.CLIENT)
 public class ImageBookEditScreen extends Screen {
@@ -28,7 +31,9 @@ public class ImageBookEditScreen extends Screen {
     private static final int IMAGE_AREA_WIDTH = 280;
     private static final int PADDING = 10;
     private static final int TEXT_FIELD_HEIGHT = 40;
-    
+    private static final int BROWSE_BUTTON_WIDTH = 60;
+    private static final int URL_FIELD_GAP = 5;
+
     private final Player player;
     private final ItemStack bookStack;
     private final InteractionHand hand;
@@ -62,17 +67,23 @@ public class ImageBookEditScreen extends Screen {
         this.leftPos = (this.width - PANEL_WIDTH) / 2;
         this.topPos = 10;
         
-        int fieldWidth = IMAGE_AREA_WIDTH;
+        int fieldWidth = IMAGE_AREA_WIDTH - BROWSE_BUTTON_WIDTH - URL_FIELD_GAP;
         int fieldX = leftPos + (PANEL_WIDTH - fieldWidth) / 2;
         int currentY = topPos;
         
         this.urlField = new EditBox(this.font, fieldX, currentY, fieldWidth, 20, 
             Component.empty());
         this.urlField.setMaxLength(500);
-        this.urlField.setHint(Component.literal("https://example.com/image.png"));
+        this.urlField.setHint(Component.translatable("screen.lotaguide.image_book.source_hint"));
         this.urlField.setResponder(this::onUrlChanged);
         this.addRenderableWidget(this.urlField);
-        
+
+        Button browseButton = Button.builder(Component.translatable("screen.lotaguide.image_book.browse"),
+            button -> openLocalGifPicker())
+            .bounds(fieldX + fieldWidth + URL_FIELD_GAP, currentY, BROWSE_BUTTON_WIDTH, 20)
+            .build();
+        this.addRenderableWidget(browseButton);
+
         currentY += 25;
         currentY += IMAGE_AREA_HEIGHT + PADDING;
         
@@ -155,7 +166,31 @@ public class ImageBookEditScreen extends Screen {
             page.setImageUrl(url);
         }
     }
-    
+
+    private void openLocalGifPicker() {
+        String currentValue = this.urlField != null ? this.urlField.getValue() : "";
+        String defaultPath = "";
+        if (currentValue != null && !currentValue.isEmpty()) {
+            File selectedFile = new File(currentValue);
+            if (selectedFile.isFile()) {
+                defaultPath = selectedFile.getAbsolutePath();
+            }
+        }
+
+        String selectedPath = TinyFileDialogs.tinyfd_openFileDialog(
+            "Select a local GIF",
+            defaultPath,
+            null,
+            "GIF images",
+            false
+        );
+
+        if (selectedPath != null && !selectedPath.isEmpty()) {
+            String normalizedPath = new File(selectedPath).getAbsolutePath();
+            Minecraft.getInstance().execute(() -> this.urlField.setValue(normalizedPath));
+        }
+    }
+
     private void onTextChanged(String text) {
         ImageBookData.Page page = bookData.getPage(currentPage);
         if (page != null) {

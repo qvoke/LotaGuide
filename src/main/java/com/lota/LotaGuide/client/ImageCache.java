@@ -17,18 +17,23 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Locale;
 
 @OnlyIn(Dist.CLIENT)
 public class ImageCache {
     private static final ImageCache INSTANCE = new ImageCache();
     private static final int MAX_CACHE_SIZE = 50;
-    private static final int MAX_FILE_SIZE = 10 * 1024 * 1024;
+    private static final int MAX_FILE_SIZE = 25 * 1024 * 1024;
     private static final int CONNECTION_TIMEOUT = 15000;
     private static final int READ_TIMEOUT = 30000;
     
@@ -144,79 +149,115 @@ public class ImageCache {
     
     private CachedImage downloadImage(String urlString) {
         try {
-            if (!urlString.startsWith("https://") && !urlString.startsWith("http://")) {
-                return new CachedImage("Invalid URL");
+            byte[] imageData = loadImageBytes(urlString);
+            if (imageData.length < 10) {
+                return new CachedImage("Empty file");
             }
-            
-            URL url = new URL(urlString);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(CONNECTION_TIMEOUT);
-            connection.setReadTimeout(READ_TIMEOUT);
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            connection.setRequestProperty("Accept", "image/*,*/*;q=0.8");
-            connection.setInstanceFollowRedirects(true);
-            
-            try {
-                int responseCode = connection.getResponseCode();
-                if (responseCode != 200) {
-                    return new CachedImage("HTTP " + responseCode);
+
+            boolean isGif = isGif(imageData, urlString);
+            if (isGif) {
+                CachedImage result = parseGif(imageData);
+                if (result != null && !result.isError()) {
+                    return result;
                 }
-                
-                int contentLength = connection.getContentLength();
-                if (contentLength > MAX_FILE_SIZE) {
-                    return new CachedImage("File too large");
-                }
-                
-                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-                try (InputStream inputStream = connection.getInputStream()) {
-                    byte[] data = new byte[16384];
-                    int bytesRead;
-                    int totalRead = 0;
-                    while ((bytesRead = inputStream.read(data)) != -1) {
-                        totalRead += bytesRead;
-                        if (totalRead > MAX_FILE_SIZE) {
-                            return new CachedImage("File too large");
-                        }
-                        buffer.write(data, 0, bytesRead);
-                    }
-                }
-                
-                byte[] imageData = buffer.toByteArray();
-                
-                if (imageData.length < 10) {
-                    return new CachedImage("Empty response");
-                }
-                
-                // Check for GIF magic bytes (GIF87a or GIF89a)
-                boolean isGif = imageData.length > 6 && 
-                    imageData[0] == (byte)'G' && 
-                    imageData[1] == (byte)'I' && 
-                    imageData[2] == (byte)'F' &&
-                    imageData[3] == (byte)'8' &&
-                    (imageData[4] == (byte)'7' || imageData[4] == (byte)'9') &&
-                    imageData[5] == (byte)'a';
-                
-                if (!isGif && urlString.toLowerCase().contains(".gif")) {
-                    isGif = true;
-                }
-                
-                if (isGif) {
-                    CachedImage result = parseGif(imageData);
-                    if (result != null && !result.isError()) {
-                        return result;
-                    }
-                    // GIF parsing failed, try as static image
-                }
-                
-                return parseStaticImage(imageData);
-                
-            } finally {
-                connection.disconnect();
             }
+
+            return parseStaticImage(imageData);
+        } catch (IllegalStateException e) {
+            return new CachedImage(e.getMessage());
         } catch (Exception e) {
             return new CachedImage("Download failed");
         }
+    }
+
+    private byte[] loadImageBytes(String source) throws Exception {
+        if (isRemoteSource(source)) {
+            return downloadRemoteImage(source);
+        }
+
+        Path path = toPath(source);
+        if (path == null) {
+            throw new IllegalStateException("Invalid path");
+        }
+        if (!Files.exists(path) || !Files.isRegularFile(path)) {
+            throw new IllegalStateException("File not found");
+        }
+
+        long fileSize = Files.size(path);
+        if (fileSize > MAX_FILE_SIZE) {
+            throw new IllegalStateException("File too large");
+        }
+
+        return Files.readAllBytes(path);
+    }
+
+    private boolean isRemoteSource(String source) {
+        String lowerSource = source.toLowerCase(Locale.ROOT);
+        return lowerSource.startsWith("http://") || lowerSource.startsWith("https://");
+    }
+
+    private Path toPath(String source) {
+        try {
+            if (source.toLowerCase(Locale.ROOT).startsWith("file:")) {
+                return Paths.get(URI.create(source));
+            }
+            return Paths.get(source);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private byte[] downloadRemoteImage(String urlString) throws Exception {
+        URL url = new URL(urlString);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(CONNECTION_TIMEOUT);
+        connection.setReadTimeout(READ_TIMEOUT);
+        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        connection.setRequestProperty("Accept", "image/*,*/*;q=0.8");
+        connection.setInstanceFollowRedirects(true);
+
+        try {
+            int responseCode = connection.getResponseCode();
+            if (responseCode != 200) {
+                throw new IllegalStateException("HTTP " + responseCode);
+            }
+
+            int contentLength = connection.getContentLength();
+            if (contentLength > MAX_FILE_SIZE) {
+                throw new IllegalStateException("File too large");
+            }
+
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            try (InputStream inputStream = connection.getInputStream()) {
+                byte[] data = new byte[16384];
+                int bytesRead;
+                int totalRead = 0;
+                while ((bytesRead = inputStream.read(data)) != -1) {
+                    totalRead += bytesRead;
+                    if (totalRead > MAX_FILE_SIZE) {
+                        throw new IllegalStateException("File too large");
+                    }
+                    buffer.write(data, 0, bytesRead);
+                }
+            }
+
+            return buffer.toByteArray();
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private boolean isGif(byte[] imageData, String source) {
+        boolean gifMagic = imageData.length > 6 &&
+            imageData[0] == (byte) 'G' &&
+            imageData[1] == (byte) 'I' &&
+            imageData[2] == (byte) 'F' &&
+            imageData[3] == (byte) '8' &&
+            (imageData[4] == (byte) '7' || imageData[4] == (byte) '9') &&
+            imageData[5] == (byte) 'a';
+
+        return gifMagic || source.toLowerCase(Locale.ROOT).contains(".gif");
     }
     
     private CachedImage parseStaticImage(byte[] imageData) {
