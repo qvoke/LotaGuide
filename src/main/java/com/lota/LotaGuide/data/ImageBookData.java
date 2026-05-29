@@ -20,6 +20,7 @@ public class ImageBookData {
     public static final String TAG_IMAGE_URL = "imageUrl";
     public static final String TAG_TEXT = "text";
     public static final String TAG_FONT_SIZE = "fontSize";
+    public static final String TAG_IMAGE_VISIBLE = "imageVisible";
     
     public static final int DEFAULT_FONT_SIZE = 12;
     public static final int MIN_FONT_SIZE = 8;
@@ -38,17 +39,20 @@ public class ImageBookData {
         private String imageUrl;
         private String text;
         private int fontSize;
+        private boolean imageVisible;
         
         public Page() {
             this.imageUrl = "";
             this.text = "";
             this.fontSize = DEFAULT_FONT_SIZE;
+            this.imageVisible = true;
         }
         
         public Page(String imageUrl, String text, int fontSize) {
             this.imageUrl = imageUrl != null ? imageUrl : "";
             this.text = text != null ? text : "";
             this.fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, fontSize));
+            this.imageVisible = true;
         }
         
         public String getImageUrl() { return imageUrl; }
@@ -60,6 +64,18 @@ public class ImageBookData {
         public int getFontSize() { return fontSize; }
         public void setFontSize(int fontSize) { 
             this.fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, fontSize)); 
+        }
+
+        public boolean isImageVisible() {
+            return imageVisible;
+        }
+
+        public void setImageVisible(boolean imageVisible) {
+            this.imageVisible = imageVisible;
+        }
+
+        public void toggleImageVisible() {
+            this.imageVisible = !this.imageVisible;
         }
         
         public void increaseFontSize() {
@@ -75,15 +91,20 @@ public class ImageBookData {
             tag.putString(TAG_IMAGE_URL, imageUrl);
             tag.putString(TAG_TEXT, text);
             tag.putInt(TAG_FONT_SIZE, fontSize);
+            tag.putBoolean(TAG_IMAGE_VISIBLE, imageVisible);
             return tag;
         }
         
         public static Page fromNBT(CompoundTag tag) {
-            return new Page(
+            Page page = new Page(
                 tag.getString(TAG_IMAGE_URL),
                 tag.getString(TAG_TEXT),
                 tag.getInt(TAG_FONT_SIZE)
             );
+            if (tag.contains(TAG_IMAGE_VISIBLE)) {
+                page.setImageVisible(tag.getBoolean(TAG_IMAGE_VISIBLE));
+            }
+            return page;
         }
     }
     

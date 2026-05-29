@@ -26,25 +26,17 @@ import java.io.File;
  */
 @OnlyIn(Dist.CLIENT)
 public class ImageBookEditScreen extends Screen {
-    private static final int PANEL_WIDTH = 300;
-    private static final int IMAGE_AREA_HEIGHT = 210;
-    private static final int IMAGE_AREA_WIDTH = 280;
-    private static final int PADDING = 10;
-    private static final int TEXT_FIELD_HEIGHT = 40;
-    private static final int BROWSE_BUTTON_WIDTH = 60;
-    private static final int URL_FIELD_GAP = 5;
-
     private final Player player;
     private final ItemStack bookStack;
     private final InteractionHand hand;
     private final ImageBookData bookData;
+    private ImageBookLayout layout;
     
     private int currentPage = 0;
-    private int leftPos;
-    private int topPos;
-    
     private EditBox urlField;
     private MultiLineEditBox textField;
+    private Button browseButton;
+    private Button imageToggleButton;
     private Button prevPageButton;
     private Button nextPageButton;
     private Button addPageButton;
@@ -63,79 +55,64 @@ public class ImageBookEditScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        
-        this.leftPos = (this.width - PANEL_WIDTH) / 2;
-        this.topPos = 10;
-        
-        int fieldWidth = IMAGE_AREA_WIDTH - BROWSE_BUTTON_WIDTH - URL_FIELD_GAP;
-        int fieldX = leftPos + (PANEL_WIDTH - fieldWidth) / 2;
-        int currentY = topPos;
-        
-        this.urlField = new EditBox(this.font, fieldX, currentY, fieldWidth, 20, 
-            Component.empty());
+
+        this.layout = ImageBookLayout.forEdit(this.width, this.height, isCurrentPageImageVisible());
+
+        this.urlField = new TransparentEditBox(this.font, layout.urlFieldX, layout.urlFieldY, layout.urlFieldWidth,
+            20, Component.empty());
         this.urlField.setMaxLength(500);
         this.urlField.setHint(Component.translatable("screen.lotaguide.image_book.source_hint"));
         this.urlField.setResponder(this::onUrlChanged);
         this.addRenderableWidget(this.urlField);
 
-        Button browseButton = Button.builder(Component.translatable("screen.lotaguide.image_book.browse"),
-            button -> openLocalGifPicker())
-            .bounds(fieldX + fieldWidth + URL_FIELD_GAP, currentY, BROWSE_BUTTON_WIDTH, 20)
+        this.browseButton = Button.builder(Component.translatable("screen.lotaguide.image_book.browse"),
+            button -> openLocalImagePicker())
+            .bounds(layout.browseButtonX, layout.browseButtonY, ImageBookLayout.browseButtonWidth(), 20)
             .build();
-        this.addRenderableWidget(browseButton);
+        this.addRenderableWidget(this.browseButton);
 
-        currentY += 25;
-        currentY += IMAGE_AREA_HEIGHT + PADDING;
-        
-        this.textField = new MultiLineEditBox(this.font, fieldX, currentY, fieldWidth, TEXT_FIELD_HEIGHT,
-            Component.empty(), Component.empty());
+        this.imageToggleButton = Button.builder(Component.translatable("screen.lotaguide.image_book.hide_image"),
+            button -> toggleImageVisibility())
+            .bounds(layout.imageToggleButtonX, layout.imageToggleButtonY, ImageBookLayout.imageToggleButtonWidth(), 20)
+            .build();
+        this.addRenderableWidget(this.imageToggleButton);
+
+        this.addPageButton = Button.builder(Component.literal("+"), button -> addPage())
+            .bounds(layout.addPageButtonX, layout.topRowY, ImageBookLayout.smallButtonWidth(), 20)
+            .build();
+        this.addRenderableWidget(this.addPageButton);
+
+        this.removePageButton = Button.builder(Component.literal("-"), button -> removePage())
+            .bounds(layout.removePageButtonX, layout.topRowY, ImageBookLayout.smallButtonWidth(), 20)
+            .build();
+        this.addRenderableWidget(this.removePageButton);
+
+        this.textField = new TransparentMultiLineEditBox(this.font, layout.textX, layout.textY, layout.textWidth,
+            layout.textHeight, Component.empty(), Component.empty());
         this.textField.setCharacterLimit(1000);
         this.textField.setValueListener(this::onTextChanged);
         this.addRenderableWidget(this.textField);
-        
-        currentY += TEXT_FIELD_HEIGHT + PADDING;
-        
-        int pageCounterY = currentY;
-        int pageCounterWidth = 50;
-        int centerX = leftPos + PANEL_WIDTH / 2;
-        
-        this.removePageButton = Button.builder(Component.literal("-"), button -> removePage())
-            .bounds(centerX - pageCounterWidth / 2 - 25, pageCounterY, 20, 20)
-            .build();
-        this.addRenderableWidget(this.removePageButton);
-        
-        this.addPageButton = Button.builder(Component.literal("+"), button -> addPage())
-            .bounds(centerX + pageCounterWidth / 2 + 5, pageCounterY, 20, 20)
-            .build();
-        this.addRenderableWidget(this.addPageButton);
-        
-        currentY += 25;
-        
-        int navButtonWidth = 25;
+
+        int bottomRowY = layout.bottomRowY;
         this.prevPageButton = Button.builder(Component.literal("<"), button -> previousPage())
-            .bounds(centerX - navButtonWidth - 5, currentY, navButtonWidth, 20)
+            .bounds(layout.prevButtonX, bottomRowY, ImageBookLayout.navButtonWidth(), 20)
             .build();
         this.addRenderableWidget(this.prevPageButton);
-        
-        this.nextPageButton = Button.builder(Component.literal(">"), button -> nextPage())
-            .bounds(centerX + 5, currentY, navButtonWidth, 20)
-            .build();
-        this.addRenderableWidget(this.nextPageButton);
-        
-        this.cancelButton = Button.builder(Component.translatable("gui.cancel"), 
-            button -> onClose())
-            .bounds(leftPos + PADDING, currentY, 60, 20)
-            .build();
-        this.addRenderableWidget(this.cancelButton);
-        
-        this.signButton = Button.builder(Component.translatable("screen.lotaguide.image_book.sign"), 
+
+        this.signButton = Button.builder(Component.translatable("screen.lotaguide.image_book.sign"),
             button -> signBook())
-            .bounds(leftPos + PANEL_WIDTH - PADDING - 60, currentY, 60, 20)
+            .bounds(layout.centerButtonX, bottomRowY, ImageBookLayout.actionButtonWidth(), 20)
             .build();
         this.addRenderableWidget(this.signButton);
-        
+
+        this.nextPageButton = Button.builder(Component.literal(">"), button -> nextPage())
+            .bounds(layout.nextButtonX, bottomRowY, ImageBookLayout.navButtonWidth(), 20)
+            .build();
+        this.addRenderableWidget(this.nextPageButton);
+
         loadPageData();
         updateNavigationButtons();
+        updateLayout();
     }
     
     private void loadPageData() {
@@ -144,6 +121,51 @@ public class ImageBookEditScreen extends Screen {
             this.urlField.setValue(page.getImageUrl());
             this.textField.setValue(page.getText());
         }
+    }
+
+    private boolean isCurrentPageImageVisible() {
+        ImageBookData.Page page = bookData.getPage(currentPage);
+        return page == null || page.isImageVisible();
+    }
+
+    private void updateLayout() {
+        boolean imageVisible = isCurrentPageImageVisible();
+        this.layout = ImageBookLayout.forEdit(this.width, this.height, imageVisible);
+
+        this.urlField.setX(layout.urlFieldX);
+        this.urlField.setY(layout.urlFieldY);
+        this.urlField.setWidth(layout.urlFieldWidth);
+        this.urlField.setHeight(20);
+
+        this.browseButton.setX(layout.browseButtonX);
+        this.browseButton.setY(layout.browseButtonY);
+
+        this.imageToggleButton.setX(layout.imageToggleButtonX);
+        this.imageToggleButton.setY(layout.imageToggleButtonY);
+        this.imageToggleButton.setWidth(ImageBookLayout.imageToggleButtonWidth());
+        this.imageToggleButton.setMessage(Component.translatable(imageVisible
+            ? "screen.lotaguide.image_book.hide_image"
+            : "screen.lotaguide.image_book.show_image"));
+
+        this.addPageButton.setX(layout.addPageButtonX);
+        this.addPageButton.setY(layout.topRowY);
+
+        this.removePageButton.setX(layout.removePageButtonX);
+        this.removePageButton.setY(layout.topRowY);
+
+        this.textField.setX(layout.textX);
+        this.textField.setY(layout.textY);
+        this.textField.setWidth(layout.textWidth);
+        this.textField.setHeight(layout.textHeight);
+
+        this.prevPageButton.setX(layout.prevButtonX);
+        this.prevPageButton.setY(layout.bottomRowY);
+
+        this.signButton.setX(layout.centerButtonX);
+        this.signButton.setY(layout.bottomRowY);
+
+        this.nextPageButton.setX(layout.nextButtonX);
+        this.nextPageButton.setY(layout.bottomRowY);
     }
     
     private void saveCurrentPage() {
@@ -167,7 +189,7 @@ public class ImageBookEditScreen extends Screen {
         }
     }
 
-    private void openLocalGifPicker() {
+    private void openLocalImagePicker() {
         String currentValue = this.urlField != null ? this.urlField.getValue() : "";
         String defaultPath = "";
         if (currentValue != null && !currentValue.isEmpty()) {
@@ -178,10 +200,10 @@ public class ImageBookEditScreen extends Screen {
         }
 
         String selectedPath = TinyFileDialogs.tinyfd_openFileDialog(
-            "Select a local GIF",
+            "Select a local image",
             defaultPath,
             null,
-            "GIF images",
+            "Image files",
             false
         );
 
@@ -204,6 +226,7 @@ public class ImageBookEditScreen extends Screen {
             currentPage--;
             loadPageData();
             updateNavigationButtons();
+            updateLayout();
         }
     }
     
@@ -213,6 +236,7 @@ public class ImageBookEditScreen extends Screen {
             currentPage++;
             loadPageData();
             updateNavigationButtons();
+            updateLayout();
         }
     }
     
@@ -222,6 +246,7 @@ public class ImageBookEditScreen extends Screen {
         currentPage = bookData.getPageCount() - 1;
         loadPageData();
         updateNavigationButtons();
+        updateLayout();
     }
     
     private void removePage() {
@@ -232,6 +257,15 @@ public class ImageBookEditScreen extends Screen {
             }
             loadPageData();
             updateNavigationButtons();
+            updateLayout();
+        }
+    }
+
+    private void toggleImageVisibility() {
+        ImageBookData.Page page = bookData.getPage(currentPage);
+        if (page != null) {
+            page.toggleImageVisible();
+            updateLayout();
         }
     }
     
@@ -259,73 +293,73 @@ public class ImageBookEditScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(graphics);
-        
-        int imageAreaX = leftPos + (PANEL_WIDTH - IMAGE_AREA_WIDTH) / 2;
-        int imageAreaY = topPos + 25;
-        
+
+        ImageBookData.Page page = bookData.getPage(currentPage);
+        boolean imageVisible = page == null || page.isImageVisible();
+
+        String pageIndicator = (currentPage + 1) + " / " + bookData.getPageCount();
+        graphics.drawCenteredString(this.font, pageIndicator,
+            layout.contentLeft + layout.contentWidth / 2, layout.pageIndicatorY + 5, 0xFFFFFF);
+
         String imageUrl = this.urlField.getValue();
         boolean hasImage = false;
-        
-        if (!imageUrl.isEmpty()) {
+
+        if (imageVisible && !imageUrl.isEmpty()) {
             ImageCache.CachedImage cachedImage = ImageCache.getInstance().getImage(imageUrl);
-            
+
             if (cachedImage != null && !cachedImage.isError()) {
                 ResourceLocation texture = cachedImage.getTexture(System.currentTimeMillis());
                 if (texture != null) {
                     hasImage = true;
                     RenderSystem.setShaderTexture(0, texture);
-                    
+
                     int imgWidth = cachedImage.getWidth();
                     int imgHeight = cachedImage.getHeight();
-                    
-                    // If image is larger than area, scale down to fit
-                    if (imgWidth > IMAGE_AREA_WIDTH || imgHeight > IMAGE_AREA_HEIGHT) {
-                        float scale = Math.min(
-                            (float) IMAGE_AREA_WIDTH / imgWidth,
-                            (float) IMAGE_AREA_HEIGHT / imgHeight
-                        );
-                        imgWidth = (int) (imgWidth * scale);
-                        imgHeight = (int) (imgHeight * scale);
-                    }
-                    
-                    // Center the image in the area
-                    int renderX = imageAreaX + (IMAGE_AREA_WIDTH - imgWidth) / 2;
-                    int renderY = imageAreaY + (IMAGE_AREA_HEIGHT - imgHeight) / 2;
-                    
-                    graphics.blit(texture, renderX, renderY, 0, 0, imgWidth, imgHeight, 
+
+                    float scale = Math.min(
+                        (float) layout.imageWidth / imgWidth,
+                        (float) layout.imageHeight / imgHeight
+                    );
+                    imgWidth = Math.max(1, (int) (imgWidth * scale));
+                    imgHeight = Math.max(1, (int) (imgHeight * scale));
+
+                    int renderX = layout.imageX + (layout.imageWidth - imgWidth) / 2;
+                    int renderY = layout.imageY + (layout.imageHeight - imgHeight) / 2;
+
+                    graphics.blit(texture, renderX, renderY, 0, 0, imgWidth, imgHeight,
                         imgWidth, imgHeight);
                 }
             }
         }
-        
-        if (!hasImage) {
-            graphics.fill(imageAreaX, imageAreaY, 
-                imageAreaX + IMAGE_AREA_WIDTH, imageAreaY + IMAGE_AREA_HEIGHT, 
-                0xFF333333);
-            
-            if (!imageUrl.isEmpty()) {
-                ImageCache.CachedImage cachedImage = ImageCache.getInstance().getImage(imageUrl);
-                if (cachedImage != null && cachedImage.isError()) {
-                    graphics.drawCenteredString(this.font, cachedImage.getErrorMessage(), 
-                        leftPos + PANEL_WIDTH / 2, imageAreaY + IMAGE_AREA_HEIGHT / 2, 0xFF5555);
-                } else if (ImageCache.getInstance().isLoading(imageUrl)) {
-                    long dots = (System.currentTimeMillis() / 500) % 4;
-                    String loading = "Loading" + ".".repeat((int) dots);
-                    graphics.drawCenteredString(this.font, loading, 
-                        leftPos + PANEL_WIDTH / 2, imageAreaY + IMAGE_AREA_HEIGHT / 2, 0xAAAAAA);
+
+        if (imageVisible) {
+            if (!hasImage) {
+                graphics.fill(layout.imageX, layout.imageY,
+                    layout.imageX + layout.imageWidth, layout.imageY + layout.imageHeight,
+                    0xFF333333);
+
+                if (!imageUrl.isEmpty()) {
+                    ImageCache.CachedImage cachedImage = ImageCache.getInstance().getImage(imageUrl);
+                    if (cachedImage != null && cachedImage.isError()) {
+                        graphics.drawCenteredString(this.font, cachedImage.getErrorMessage(),
+                            layout.contentLeft + layout.contentWidth / 2,
+                            layout.imageY + layout.imageHeight / 2, 0xFF5555);
+                    } else if (ImageCache.getInstance().isLoading(imageUrl)) {
+                        long dots = (System.currentTimeMillis() / 500) % 4;
+                        String loading = "Loading" + ".".repeat((int) dots);
+                        graphics.drawCenteredString(this.font, loading,
+                            layout.contentLeft + layout.contentWidth / 2,
+                            layout.imageY + layout.imageHeight / 2, 0xAAAAAA);
+                    }
+                } else {
+                    graphics.drawCenteredString(this.font,
+                        Component.translatable("screen.lotaguide.image_book.no_image").getString(),
+                        layout.contentLeft + layout.contentWidth / 2,
+                        layout.imageY + layout.imageHeight / 2, 0x888888);
                 }
-            } else {
-                graphics.drawCenteredString(this.font, 
-                    Component.translatable("screen.lotaguide.image_book.no_image").getString(), 
-                    leftPos + PANEL_WIDTH / 2, imageAreaY + IMAGE_AREA_HEIGHT / 2, 0x888888);
             }
         }
-        
-        int pageCounterY = topPos + 25 + IMAGE_AREA_HEIGHT + PADDING + TEXT_FIELD_HEIGHT + PADDING;
-        String pageIndicator = (currentPage + 1) + " / " + bookData.getPageCount();
-        graphics.drawCenteredString(this.font, pageIndicator, 
-            leftPos + PANEL_WIDTH / 2, pageCounterY + 5, 0xFFFFFF);
-        
+
         super.render(graphics, mouseX, mouseY, partialTick);
     }
     

@@ -4,9 +4,11 @@
     "item.lotaguide.signed_image_book.pages": "%d страниц",
     "itemGroup.lotaguide.lota_tab": "Lota Guide",
     "screen.lotaguide.image_book.text_hint": "Введите текст...",
-    "screen.lotaguide.image_book.source_hint": "Введите URL или путь к GIF",
+    "screen.lotaguide.image_book.source_hint": "Введите URL или путь к изображению",
     "screen.lotaguide.image_book.no_image": "Введите ссылку или путь выше",
     "screen.lotaguide.image_book.browse": "Обзор",
+    "screen.lotaguide.image_book.hide_image": "Скрыть изображение",
+    "screen.lotaguide.image_book.show_image": "Показать изображение",
     "screen.lotaguide.image_book.sign": "Готово",
     "screen.lotaguide.image_book.edit": "Редактировать"
 }
