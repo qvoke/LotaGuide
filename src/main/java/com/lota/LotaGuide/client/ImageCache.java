@@ -1,11 +1,13 @@
 package com.lota.LotaGuide.client;
 
+import com.lota.LotaGuide.config.LotaGuideConfig;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import javax.annotation.Nullable;
 import javax.imageio.ImageIO;
@@ -175,7 +177,7 @@ public class ImageCache {
             return downloadRemoteImage(source);
         }
 
-        Path path = toPath(source);
+        Path path = resolveLocalSourcePath(source);
         if (path == null) {
             throw new IllegalStateException("Invalid path");
         }
@@ -189,6 +191,30 @@ public class ImageCache {
         }
 
         return Files.readAllBytes(path);
+    }
+
+    private Path resolveLocalSourcePath(String source) {
+        Path rawPath = toPath(source);
+        if (rawPath == null) {
+            return null;
+        }
+
+        if (rawPath.isAbsolute()) {
+            return rawPath.normalize();
+        }
+
+        Path configuredRoot = LotaGuideConfig.getLocalImageRootPath();
+        Path rootCandidate = configuredRoot.resolve(rawPath).normalize();
+        if (Files.exists(rootCandidate)) {
+            return rootCandidate;
+        }
+
+        Path gameDirCandidate = FMLPaths.GAMEDIR.get().resolve(rawPath).normalize();
+        if (Files.exists(gameDirCandidate)) {
+            return gameDirCandidate;
+        }
+
+        return rootCandidate;
     }
 
     private boolean isRemoteSource(String source) {
@@ -324,13 +350,17 @@ public class ImageCache {
             width = firstFrame.getWidth();
             height = firstFrame.getHeight();
             
-            // Create a canvas for compositing frames
             BufferedImage canvas = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g = canvas.createGraphics();
-            g.setBackground(new Color(0, 0, 0, 0));
+            Graphics2D canvasGraphics = canvas.createGraphics();
+            canvasGraphics.setComposite(AlphaComposite.SrcOver);
+            canvasGraphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            canvasGraphics.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+            canvasGraphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
             
             int frameIndex = 0;
             int maxFrames = 300; // Limit to prevent memory issues
+            BufferedImage previousCanvas = null;
+            GifFrameMetadata previousMetadata = null;
             
             while (frameIndex < maxFrames) {
                 BufferedImage frame;
@@ -343,55 +373,29 @@ public class ImageCache {
                 }
                 
                 if (frame == null) break;
-                
-                g.drawImage(frame, 0, 0, null);
-                
-                // Create a copy of the current canvas state
-                BufferedImage completeFrame = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-                Graphics2D g2 = completeFrame.createGraphics();
-                g2.drawImage(canvas, 0, 0, null);
-                g2.dispose();
-                
-                frames.add(completeFrame);
-                
-                int delay = 100;
-                try {
-                    javax.imageio.metadata.IIOMetadata metadata = reader.getImageMetadata(frameIndex);
-                    if (metadata != null) {
-                        String[] formatNames = metadata.getMetadataFormatNames();
-                        for (String formatName : formatNames) {
-                            if (formatName.equals("javax_imageio_gif_image_1.0")) {
-                                org.w3c.dom.Node root = metadata.getAsTree(formatName);
-                                org.w3c.dom.NodeList children = root.getChildNodes();
-                                for (int i = 0; i < children.getLength(); i++) {
-                                    org.w3c.dom.Node child = children.item(i);
-                                    if ("GraphicControlExtension".equals(child.getNodeName())) {
-                                        org.w3c.dom.NamedNodeMap attrs = child.getAttributes();
-                                        if (attrs != null) {
-                                            org.w3c.dom.Node delayNode = attrs.getNamedItem("delayTime");
-                                            if (delayNode != null) {
-                                                int delayValue = Integer.parseInt(delayNode.getNodeValue());
-                                                delay = delayValue * 10;
-                                                if (delay <= 0) delay = 100;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {}
-                
-                delays.add(delay);
+
+                GifFrameMetadata currentMetadata = readGifFrameMetadata(reader.getImageMetadata(frameIndex), frame.getWidth(), frame.getHeight());
+
+                if (previousMetadata != null) {
+                    applyDisposal(canvas, previousCanvas, previousMetadata);
+                }
+
+                BufferedImage canvasSnapshot = copyImage(canvas);
+                canvasGraphics.drawImage(frame, currentMetadata.left, currentMetadata.top, null);
+
+                frames.add(copyImage(canvas));
+                delays.add(currentMetadata.delay);
+
+                previousCanvas = canvasSnapshot;
+                previousMetadata = currentMetadata;
                 frameIndex++;
             }
             
-            g.dispose();
+            canvasGraphics.dispose();
             reader.dispose();
             stream.close();
             
         } catch (Exception e) {
-            // Complete failure
             return null;
         }
         
@@ -421,6 +425,119 @@ public class ImageCache {
         
         return new CachedImage(textures, delays, width, height);
     }
+
+    private GifFrameMetadata readGifFrameMetadata(javax.imageio.metadata.IIOMetadata metadata, int fallbackWidth, int fallbackHeight) {
+        int left = 0;
+        int top = 0;
+        int width = fallbackWidth;
+        int height = fallbackHeight;
+        int delay = 100;
+        String disposalMethod = "none";
+
+        if (metadata != null) {
+            try {
+                String[] formatNames = metadata.getMetadataFormatNames();
+                for (String formatName : formatNames) {
+                    if ("javax_imageio_gif_image_1.0".equals(formatName)) {
+                        org.w3c.dom.Node root = metadata.getAsTree(formatName);
+                        org.w3c.dom.NodeList children = root.getChildNodes();
+                        for (int i = 0; i < children.getLength(); i++) {
+                            org.w3c.dom.Node child = children.item(i);
+                            String nodeName = child.getNodeName();
+                            org.w3c.dom.NamedNodeMap attrs = child.getAttributes();
+                            if (attrs == null) {
+                                continue;
+                            }
+
+                            if ("GraphicControlExtension".equals(nodeName)) {
+                                org.w3c.dom.Node delayNode = attrs.getNamedItem("delayTime");
+                                if (delayNode != null) {
+                                    int delayValue = Integer.parseInt(delayNode.getNodeValue());
+                                    delay = delayValue * 10;
+                                    if (delay <= 0) {
+                                        delay = 100;
+                                    }
+                                }
+
+                                org.w3c.dom.Node disposalNode = attrs.getNamedItem("disposalMethod");
+                                if (disposalNode != null) {
+                                    disposalMethod = disposalNode.getNodeValue();
+                                }
+                            } else if ("ImageDescriptor".equals(nodeName)) {
+                                org.w3c.dom.Node leftNode = attrs.getNamedItem("imageLeftPosition");
+                                org.w3c.dom.Node topNode = attrs.getNamedItem("imageTopPosition");
+                                org.w3c.dom.Node widthNode = attrs.getNamedItem("imageWidth");
+                                org.w3c.dom.Node heightNode = attrs.getNamedItem("imageHeight");
+
+                                if (leftNode != null) {
+                                    left = Integer.parseInt(leftNode.getNodeValue());
+                                }
+                                if (topNode != null) {
+                                    top = Integer.parseInt(topNode.getNodeValue());
+                                }
+                                if (widthNode != null) {
+                                    width = Integer.parseInt(widthNode.getNodeValue());
+                                }
+                                if (heightNode != null) {
+                                    height = Integer.parseInt(heightNode.getNodeValue());
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        return new GifFrameMetadata(left, top, width, height, delay, disposalMethod);
+    }
+
+    private void applyDisposal(BufferedImage canvas, BufferedImage previousCanvas, GifFrameMetadata previousMetadata) {
+        if (previousMetadata == null) {
+            return;
+        }
+
+        if ("restoreToPrevious".equals(previousMetadata.disposalMethod) && previousCanvas != null) {
+            Graphics2D restoreGraphics = canvas.createGraphics();
+            restoreGraphics.setComposite(AlphaComposite.Src);
+            restoreGraphics.drawImage(previousCanvas, 0, 0, null);
+            restoreGraphics.dispose();
+            return;
+        }
+
+        if ("restoreToBackgroundColor".equals(previousMetadata.disposalMethod)) {
+            Graphics2D clearGraphics = canvas.createGraphics();
+            clearGraphics.setComposite(AlphaComposite.Clear);
+            clearGraphics.fillRect(previousMetadata.left, previousMetadata.top, previousMetadata.width, previousMetadata.height);
+            clearGraphics.dispose();
+        }
+    }
+
+    private BufferedImage copyImage(BufferedImage source) {
+        BufferedImage copy = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = copy.createGraphics();
+        graphics.drawImage(source, 0, 0, null);
+        graphics.dispose();
+        return copy;
+    }
+
+    private static final class GifFrameMetadata {
+        private final int left;
+        private final int top;
+        private final int width;
+        private final int height;
+        private final int delay;
+        private final String disposalMethod;
+
+        private GifFrameMetadata(int left, int top, int width, int height, int delay, String disposalMethod) {
+            this.left = left;
+            this.top = top;
+            this.width = width;
+            this.height = height;
+            this.delay = delay;
+            this.disposalMethod = disposalMethod;
+        }
+    }
     
     private ResourceLocation createTexture(BufferedImage image) {
         try {
@@ -443,7 +560,6 @@ public class ImageCache {
                     int r = (argb >> 16) & 0xFF;
                     int g = (argb >> 8) & 0xFF;
                     int b = argb & 0xFF;
-                    // ABGR format for NativeImage
                     int abgr = (a << 24) | (b << 16) | (g << 8) | r;
                     nativeImage.setPixelRGBA(x, y, abgr);
                 }
@@ -455,10 +571,12 @@ public class ImageCache {
             Minecraft mc = Minecraft.getInstance();
             if (mc.isSameThread()) {
                 DynamicTexture dynamicTexture = new DynamicTexture(finalImage);
+                dynamicTexture.setFilter(true, false);
                 result[0] = mc.getTextureManager().register("lotaguide_", dynamicTexture);
             } else {
                 mc.executeBlocking(() -> {
                     DynamicTexture dynamicTexture = new DynamicTexture(finalImage);
+                    dynamicTexture.setFilter(true, false);
                     result[0] = mc.getTextureManager().register("lotaguide_", dynamicTexture);
                 });
             }

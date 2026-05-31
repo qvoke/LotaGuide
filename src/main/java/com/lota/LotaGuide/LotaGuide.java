@@ -1,11 +1,14 @@
 package com.lota.LotaGuide;
 
+import com.lota.LotaGuide.config.LotaGuideConfig;
 import com.lota.LotaGuide.item.ImageBookItem;
 import com.lota.LotaGuide.item.SignedImageBookItem;
+import com.lota.LotaGuide.network.LotaGuideNetwork;
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
@@ -15,6 +18,8 @@ import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -49,7 +54,9 @@ public class LotaGuide {
         IEventBus modEventBus = context.getModEventBus();
         
         modEventBus.addListener(this::commonSetup);
-        
+
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, LotaGuideConfig.SPEC);
+        LotaGuideNetwork.register();
         ITEMS.register(modEventBus);
         CREATIVE_MODE_TABS.register(modEventBus);
         
@@ -58,6 +65,10 @@ public class LotaGuide {
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         LOGGER.info("LotaGuide mod initialized");
+    }
+
+    public static ResourceLocation id(String path) {
+        return new ResourceLocation(MODID, path);
     }
 
     @SubscribeEvent

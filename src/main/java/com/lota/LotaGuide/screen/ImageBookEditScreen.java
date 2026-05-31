@@ -3,6 +3,8 @@ package com.lota.LotaGuide.screen;
 import com.lota.LotaGuide.LotaGuide;
 import com.lota.LotaGuide.client.ImageCache;
 import com.lota.LotaGuide.data.ImageBookData;
+import com.lota.LotaGuide.config.LotaGuideConfig;
+import com.lota.LotaGuide.network.LotaGuideNetwork;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -17,9 +19,13 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.loading.FMLPaths;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
  * Screen for editing an Image Book.
@@ -43,6 +49,7 @@ public class ImageBookEditScreen extends Screen {
     private Button removePageButton;
     private Button signButton;
     private Button cancelButton;
+    private boolean closingAsSigned;
     
     public ImageBookEditScreen(Player player, ItemStack bookStack, InteractionHand hand, ImageBookData bookData) {
         super(Component.empty());
@@ -191,11 +198,30 @@ public class ImageBookEditScreen extends Screen {
 
     private void openLocalImagePicker() {
         String currentValue = this.urlField != null ? this.urlField.getValue() : "";
-        String defaultPath = "";
-        if (currentValue != null && !currentValue.isEmpty()) {
-            File selectedFile = new File(currentValue);
-            if (selectedFile.isFile()) {
-                defaultPath = selectedFile.getAbsolutePath();
+        Path imageRoot = LotaGuideConfig.getLocalImageRootPath();
+        try {
+            Files.createDirectories(imageRoot);
+        } catch (Exception ignored) {
+        }
+
+        String defaultPath = imageRoot.toString();
+        if (currentValue != null && !currentValue.isEmpty() && !currentValue.startsWith("http://") && !currentValue.startsWith("https://")) {
+            try {
+                Path currentPath = Paths.get(currentValue);
+                if (currentPath.isAbsolute() && currentPath.toFile().isFile()) {
+                    defaultPath = currentPath.toAbsolutePath().toString();
+                } else {
+                    Path rootCandidate = imageRoot.resolve(currentPath).normalize();
+                    if (rootCandidate.toFile().isFile()) {
+                        defaultPath = rootCandidate.toAbsolutePath().toString();
+                    } else {
+                        Path gameDirCandidate = FMLPaths.GAMEDIR.get().resolve(currentPath).normalize();
+                        if (gameDirCandidate.toFile().isFile()) {
+                            defaultPath = gameDirCandidate.toAbsolutePath().toString();
+                        }
+                    }
+                }
+            } catch (RuntimeException ignored) {
             }
         }
 
@@ -208,8 +234,12 @@ public class ImageBookEditScreen extends Screen {
         );
 
         if (selectedPath != null && !selectedPath.isEmpty()) {
-            String normalizedPath = new File(selectedPath).getAbsolutePath();
-            Minecraft.getInstance().execute(() -> this.urlField.setValue(normalizedPath));
+            Path selectedFile = Paths.get(selectedPath).toAbsolutePath().normalize();
+            Path rootPath = LotaGuideConfig.getLocalImageRootPath().toAbsolutePath().normalize();
+            String valueToStore = selectedFile.startsWith(rootPath)
+                ? rootPath.relativize(selectedFile).toString().replace(File.separatorChar, '/')
+                : selectedFile.toString();
+            Minecraft.getInstance().execute(() -> this.urlField.setValue(valueToStore));
         }
     }
 
@@ -274,19 +304,22 @@ public class ImageBookEditScreen extends Screen {
         
         bookData.setAuthorUUID(player.getUUID());
         bookData.setAuthorName(player.getName().getString());
-        
-        ItemStack signedBook = new ItemStack(LotaGuide.SIGNED_IMAGE_BOOK.get());
-        bookData.saveToStack(signedBook);
-        
-        player.setItemInHand(hand, signedBook);
-        
+        this.closingAsSigned = true;
         this.onClose();
     }
     
     @Override
     public void onClose() {
         saveCurrentPage();
-        bookData.saveToStack(bookStack);
+        if (closingAsSigned) {
+            ItemStack signedBook = new ItemStack(LotaGuide.SIGNED_IMAGE_BOOK.get());
+            bookData.saveToStack(signedBook);
+            player.setItemInHand(hand, signedBook);
+            LotaGuideNetwork.sendSyncImageBookStack(hand, bookData, true);
+        } else {
+            bookData.saveToStack(bookStack);
+            LotaGuideNetwork.sendSyncImageBookStack(hand, bookData, false);
+        }
         super.onClose();
     }
     
